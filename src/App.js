@@ -1,4 +1,3 @@
-// src/App.js
 import React, { useState } from 'react';
 
 export default function App() {
@@ -6,6 +5,7 @@ export default function App() {
   const [article, setArticle] = useState(null); // Stores structured article data
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [copySuccess, setCopySuccess] = useState(''); // State for copy message
 
   // IMPORTANT: This URL points to your deployed Cloudflare Worker backend.
   // We've confirmed this URL: https://artgenbackend.worksbeyondworks.workers.dev/
@@ -18,16 +18,10 @@ export default function App() {
       return;
     }
 
-    // This check is no longer strictly needed if API_ENDPOINT is hardcoded correctly.
-    // However, it's good practice for initial setup
-    if (API_ENDPOINT.includes('YOUR_CLOUDFLARE_WORKER_URL')) {
-      setError("Error: API_ENDPOINT is still a placeholder. Please update App.js with your actual Cloudflare Worker URL.");
-      return;
-    }
-
     setLoading(true);
     setError(null);
-    setArticle(null);
+    setArticle(null); // Clear previous article
+    setCopySuccess(''); // Clear copy success message
 
     try {
       // Make a POST request to your Cloudflare Worker backend
@@ -40,20 +34,107 @@ export default function App() {
       });
 
       if (!response.ok) {
-        // If the backend returns an error, parse and display it
         const errorData = await response.json();
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
       setArticle(data); // Set the structured article data
-      console.log("Generated Article:", data); // Log the full structure for debugging
+      console.log("Generated Article:", data);
 
     } catch (err) {
       console.error("Error generating article:", err);
       setError(`Failed to generate article: ${err.message}. Please try again or with a different topic.`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  /**
+   * Formats the article object into a Markdown string.
+   * @param {Object} articleData The structured article object.
+   * @returns {string} The article content formatted as Markdown.
+   */
+  const formatArticleAsMarkdown = (articleData) => {
+    if (!articleData) return '';
+
+    let markdown = `# ${articleData.title || 'Untitled Article'}\n\n`;
+
+    if (articleData.subtitle) {
+      markdown += `## ${articleData.subtitle}\n\n`;
+    }
+
+    if (articleData.introduction) {
+      markdown += `${articleData.introduction}\n\n`;
+    }
+
+    articleData.sections.forEach(section => {
+      if (section.heading) {
+        markdown += `### ${section.heading}\n\n`;
+      }
+      section.content.forEach(block => {
+        if (block.type === 'text') {
+          markdown += `${block.value}\n\n`;
+        } else if (block.type === 'image' && block.url) {
+          markdown += `![${block.caption || 'Image'}](${block.url})\n\n`;
+        }
+      });
+    });
+
+    if (articleData.faq_section && articleData.faq_section.length > 0) {
+      markdown += `## Frequently Asked Questions\n\n`;
+      articleData.faq_section.forEach(faq => {
+        markdown += `* **Q:** ${faq.question}\n`;
+        markdown += `  **A:** ${faq.answer}\n\n`;
+      });
+    }
+
+    if (articleData.conclusion) {
+      markdown += `## Conclusion\n\n`;
+      markdown += `${articleData.conclusion}\n\n`;
+    }
+
+    return markdown;
+  };
+
+  /**
+   * Handles downloading the generated article as a Markdown file.
+   */
+  const handleDownloadArticle = () => {
+    if (!article) {
+      setError("No article to download.");
+      return;
+    }
+    const markdownContent = formatArticleAsMarkdown(article);
+    const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${(article.title || 'article').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url); // Clean up the object URL
+  };
+
+  /**
+   * Handles copying the generated article to the clipboard.
+   */
+  const handleCopyArticle = async () => {
+    if (!article) {
+      setError("No article to copy.");
+      return;
+    }
+    const markdownContent = formatArticleAsMarkdown(article);
+    try {
+      // document.execCommand('copy') is generally discouraged and has limited support in modern contexts.
+      // navigator.clipboard.writeText is the modern, preferred way.
+      await navigator.clipboard.writeText(markdownContent);
+      setCopySuccess('Article copied to clipboard!');
+      setTimeout(() => setCopySuccess(''), 3000); // Clear message after 3 seconds
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+      setCopySuccess('Failed to copy article. Please try manually.');
     }
   };
 
@@ -102,11 +183,46 @@ export default function App() {
 
       {article && (
         <div className="w-full max-w-4xl bg-gray-800 rounded-xl shadow-2xl p-6 sm:p-10 prose prose-invert max-w-none">
+          {/* Article Action Buttons */}
+          <div className="flex justify-center gap-4 mb-8">
+            <button
+              onClick={handleDownloadArticle}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium transition-colors duration-300 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+            >
+              Download Article (.md)
+            </button>
+            <button
+              onClick={handleCopyArticle}
+              className="px-6 py-3 bg-green-600 text-white rounded-lg font-medium transition-colors duration-300 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+            >
+              Copy Article (Markdown)
+            </button>
+          </div>
+          {copySuccess && (
+            <p className="text-green-400 text-center text-sm mb-4">{copySuccess}</p>
+          )}
+
+          {/* Article Content Display */}
           {article.title && (
-            <h2 className="text-3xl sm:text-4xl font-bold text-indigo-400 mb-6 border-b border-gray-700 pb-4">
+            <h2 className="text-3xl sm:text-4xl font-bold text-indigo-400 mb-2 border-b border-gray-700 pb-4">
               {article.title}
             </h2>
           )}
+          {article.subtitle && (
+            <h3 className="text-xl sm:text-2xl font-semibold text-gray-300 mb-6">
+              {article.subtitle}
+            </h3>
+          )}
+
+          {article.introduction && (
+            <div className="mb-8">
+              <h3 className="text-2xl sm:text-3xl font-semibold text-gray-200 mb-4">Introduction</h3>
+              <p className="text-gray-300 leading-relaxed mb-4">
+                {article.introduction}
+              </p>
+            </div>
+          )}
+
           {article.sections.map((section, index) => (
             <div key={index} className="mb-8">
               {section.heading && (
@@ -116,6 +232,7 @@ export default function App() {
               )}
               {section.content.map((block, blockIndex) => (
                 <React.Fragment key={blockIndex}>
+                  {/* Handle both text and image blocks within content array */}
                   {block.type === 'text' && (
                     <p className="text-gray-300 leading-relaxed mb-4">
                       {block.value}
@@ -143,6 +260,31 @@ export default function App() {
               ))}
             </div>
           ))}
+
+          {article.faq_section && article.faq_section.length > 0 && (
+            <div className="mb-8">
+              <h3 className="text-2xl sm:text-3xl font-semibold text-gray-200 mb-4">Frequently Asked Questions</h3>
+              {article.faq_section.map((faq, index) => (
+                <div key={`faq-${index}`} className="mb-4">
+                  <p className="text-gray-300 leading-relaxed">
+                    <strong className="text-indigo-400">Q:</strong> {faq.question}
+                  </p>
+                  <p className="text-gray-300 leading-relaxed ml-4">
+                    <strong className="text-green-400">A:</strong> {faq.answer}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {article.conclusion && (
+            <div className="mb-8">
+              <h3 className="text-2xl sm:text-3xl font-semibold text-gray-200 mb-4">Conclusion</h3>
+              <p className="text-gray-300 leading-relaxed mb-4">
+                {article.conclusion}
+              </p>
+            </div>
+          )}
         </div>
       )}
 
